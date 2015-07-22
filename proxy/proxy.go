@@ -11,8 +11,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/fsouza/go-dockerclient"
+	docker "github.com/fsouza/go-dockerclient"
 	. "github.com/weaveworks/weave/common"
+	weavedocker "github.com/weaveworks/weave/common/docker"
 )
 
 const (
@@ -25,7 +26,6 @@ const (
 
 var (
 	containerCreateRegexp = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/create$")
-	containerStartRegexp  = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/[^/]*/(re)?start$")
 	execCreateRegexp      = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/[^/]*/exec$")
 
 	ErrInvalidNetworkMode = errors.New("--net option")
@@ -60,11 +60,12 @@ func NewProxy(c Config) (*Proxy, error) {
 		Log.Fatalf("Could not configure tls for proxy: %s", err)
 	}
 
-	client, err := docker.NewClient(dockerSockUnix)
+	client, err := weavedocker.NewClient(dockerSockUnix)
 	if err != nil {
 		return nil, err
 	}
-	p.client = client
+	p.client = client.Client
+	client.AddObserver(p)
 
 	if !p.WithoutDNS {
 		dockerBridgeIP, stderr, err := callWeave("docker-bridge-ip")
@@ -117,8 +118,6 @@ func (proxy *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case containerCreateRegexp.MatchString(path):
 		i = &createContainerInterceptor{proxy}
-	case containerStartRegexp.MatchString(path):
-		i = &startContainerInterceptor{proxy}
 	case execCreateRegexp.MatchString(path):
 		i = &createExecInterceptor{proxy}
 	default:
@@ -218,6 +217,55 @@ func (proxy *Proxy) listen(protoAndAddr string) (net.Listener, string, error) {
 	}
 
 	return listener, fmt.Sprintf("%s://%s", proto, addr), nil
+}
+
+// weavedocker.ContainerObserver interface
+func (proxy *Proxy) ContainerStarted(ident string) {
+	container, err := proxy.client.InspectContainer(ident)
+	if err != nil {
+		Log.Warningf("Error inspecting container %s: %v", ident, err)
+		return
+	}
+	// If this was a container we modified the entrypoint for, attach it to the network
+	if len(container.Config.Entrypoint) > 0 && container.Config.Entrypoint[0] == weaveWaitEntrypoint[0] {
+		proxy.attach(container)
+	}
+}
+
+func (proxy *Proxy) ContainerDied(ident string) {
+}
+
+func (proxy *Proxy) attach(container *docker.Container) error {
+	cidrs, err := proxy.weaveCIDRsFromConfig(container.Config, container.HostConfig)
+	if err != nil {
+		Log.Infof("Ignoring container %s due to %s", container.ID, err)
+		return nil
+	}
+	Log.Infof("Attaching container %s with WEAVE_CIDR \"%s\" to weave network", container.ID, strings.Join(cidrs, " "))
+	args := []string{"attach"}
+	args = append(args, cidrs...)
+	args = append(args, "--or-die", container.ID)
+	if _, stderr, err := callWeave(args...); err != nil {
+		Log.Warningf("Attaching container %s to weave network failed: %s", container.ID, string(stderr))
+		return errors.New(string(stderr))
+	} else if len(stderr) > 0 {
+		Log.Warningf("Attaching container %s to weave network: %s", container.ID, string(stderr))
+	}
+
+	if !proxy.NoRewriteHosts {
+		ips, err := weaveContainerIPs(container)
+		if err != nil {
+			return err
+		}
+		if len(ips) > 0 {
+			if err := updateHosts(container.HostsPath, container.Config.Hostname, ips); err != nil {
+				return err
+			}
+		}
+	}
+
+	// send SIGUSR2 to let weavewait know network is ready
+	return proxy.client.KillContainer(docker.KillContainerOptions{ID: container.ID, Signal: docker.SIGUSR2})
 }
 
 func (proxy *Proxy) weaveCIDRsFromConfig(config *docker.Config, hostConfig *docker.HostConfig) ([]string, error) {

@@ -7,6 +7,7 @@ import (
 
 // An observer for container events
 type ContainerObserver interface {
+	ContainerStarted(ident string)
 	ContainerDied(ident string)
 }
 
@@ -41,6 +42,9 @@ func (c *Client) AddObserver(ob ContainerObserver) error {
 	go func() {
 		for event := range events {
 			switch event.Status {
+			case "start":
+				id := event.ID
+				ob.ContainerStarted(id)
 			case "die":
 				id := event.ID
 				ob.ContainerDied(id)
