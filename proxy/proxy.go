@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -26,6 +27,7 @@ const (
 
 var (
 	containerCreateRegexp = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/create$")
+	containerStartRegexp  = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/[^/]*/(re)?start$")
 	execCreateRegexp      = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/[^/]*/exec$")
 
 	ErrInvalidNetworkMode = errors.New("--net option")
@@ -46,15 +48,17 @@ type Config struct {
 }
 
 type Proxy struct {
+	sync.RWMutex
 	Config
 	client              *docker.Client
 	dockerBridgeIP      string
 	hostnameMatchRegexp *regexp.Regexp
 	weaveWaitVolume     string
+	waitChan            map[string]chan struct{}
 }
 
 func NewProxy(c Config) (*Proxy, error) {
-	p := &Proxy{Config: c}
+	p := &Proxy{Config: c, waitChan: make(map[string]chan struct{})}
 
 	if err := p.TLSConfig.loadCerts(); err != nil {
 		Log.Fatalf("Could not configure tls for proxy: %s", err)
@@ -127,6 +131,8 @@ func (proxy *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case containerCreateRegexp.MatchString(path):
 		i = &createContainerInterceptor{proxy}
+	case containerStartRegexp.MatchString(path):
+		i = &startContainerInterceptor{proxy}
 	case execCreateRegexp.MatchString(path):
 		i = &createExecInterceptor{proxy}
 	default:
@@ -236,8 +242,40 @@ func (proxy *Proxy) ContainerStarted(ident string) {
 		return
 	}
 	// If this was a container we modified the entrypoint for, attach it to the network
-	if len(container.Config.Entrypoint) > 0 && container.Config.Entrypoint[0] == weaveWaitEntrypoint[0] {
+	if containerShouldAttach(container) {
 		proxy.attach(container)
+	}
+	proxy.notifyWaiters(container.ID)
+}
+
+func containerShouldAttach(container *docker.Container) bool {
+	return len(container.Config.Entrypoint) > 0 && container.Config.Entrypoint[0] == weaveWaitEntrypoint[0]
+}
+
+func (proxy *Proxy) createWait(ident string) {
+	proxy.Lock()
+	if _, found := proxy.waitChan[ident]; !found {
+		proxy.waitChan[ident] = make(chan struct{})
+	}
+	proxy.Unlock()
+}
+
+func (proxy *Proxy) notifyWaiters(ident string) {
+	proxy.Lock()
+	if ch, found := proxy.waitChan[ident]; found {
+		close(ch)
+		delete(proxy.waitChan, ident)
+	}
+	proxy.Unlock()
+}
+
+func (proxy *Proxy) waitForStart(ident string) {
+	Log.Debugf("Wait for start of container %s", ident)
+	proxy.Lock()
+	ch, found := proxy.waitChan[ident]
+	proxy.Unlock()
+	if found {
+		<-ch
 	}
 }
 
