@@ -26,6 +26,11 @@ func main() {
 		args = args[1:]
 	}
 
+	if len(args) > 0 && args[0] == "-c" { // tell pid 1 to continue
+		checkErr(syscall.Kill(1, syscall.SIGUSR2))
+		os.Exit(0)
+	}
+
 	if notInExec {
 		usr2 := make(chan os.Signal)
 		signal.Notify(usr2, syscall.SIGUSR2)
