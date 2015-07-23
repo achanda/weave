@@ -88,6 +88,15 @@ func NewProxy(c Config) (*Proxy, error) {
 	return p, nil
 }
 
+func (proxy *Proxy) AttachExistingContainers() {
+	containers, _ := proxy.client.ListContainers(docker.ListContainersOptions{})
+	for _, cont := range containers {
+		if strings.HasPrefix(cont.Command, weaveWaitEntrypoint[0]) {
+			proxy.ContainerStarted(cont.ID)
+		}
+	}
+}
+
 func (proxy *Proxy) Dial() (net.Conn, error) {
 	return net.Dial("unix", dockerSock)
 }
