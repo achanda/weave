@@ -49,7 +49,7 @@ func (i *startContainerInterceptor) InterceptResponse(r *http.Response) error {
 	}
 
 	if !i.proxy.NoRewriteHosts {
-		ips, err := weaveContainerIPs(container)
+		_, ips, _, err := weaveContainerIPs(container)
 		if err != nil {
 			return err
 		}
@@ -61,31 +61,6 @@ func (i *startContainerInterceptor) InterceptResponse(r *http.Response) error {
 	}
 
 	return i.proxy.client.KillContainer(docker.KillContainerOptions{ID: container.ID, Signal: docker.SIGUSR2})
-}
-
-func weaveContainerIPs(container *docker.Container) ([]net.IP, error) {
-	stdout, stderr, err := callWeave("ps", container.ID)
-	if err != nil || len(stderr) > 0 {
-		return nil, errors.New(string(stderr))
-	}
-	if len(stdout) <= 0 {
-		return nil, nil
-	}
-
-	fields := strings.Fields(string(stdout))
-	if len(fields) <= 2 {
-		return nil, nil
-	}
-
-	var ips []net.IP
-	for _, cidr := range fields[2:] {
-		ip, _, err := net.ParseCIDR(cidr)
-		if err != nil {
-			return nil, err
-		}
-		ips = append(ips, ip)
-	}
-	return ips, nil
 }
 
 func updateHosts(path, hostname string, ips []net.IP) error {
