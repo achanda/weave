@@ -32,15 +32,17 @@ func (i *startContainerInterceptor) InterceptResponse(r *http.Response) (err err
 		return err
 	}
 
-	defer func() {
-		// If entrypoint is weavewait we need to USR2 it so it starts! Even if
-		// networking has been disabled since creation (as kubernetes does)
-		if err == nil &&
-			len(container.Config.Entrypoint) > 0 &&
-			container.Config.Entrypoint[0] == weaveWaitEntrypoint[0] {
-			err = i.proxy.client.KillContainer(docker.KillContainerOptions{ID: container.ID, Signal: docker.SIGUSR2})
-		}
-	}()
+	// If entrypoint is weavewait we need to USR2 it so it starts! Even if
+	// networking has been disabled since creation (as kubernetes does)
+	if container.Config != nil &&
+		len(container.Config.Entrypoint) > 0 &&
+		container.Config.Entrypoint[0] == weaveWaitEntrypoint[0] {
+		defer func() {
+			if err == nil {
+				err = i.proxy.client.KillContainer(docker.KillContainerOptions{ID: container.ID, Signal: docker.SIGUSR2})
+			}
+		}()
+	}
 
 	cidrs, err := i.proxy.weaveCIDRsFromConfig(container.Config, container.HostConfig)
 	if err != nil {

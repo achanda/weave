@@ -27,7 +27,6 @@ var (
 	containerCreateRegexp  = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/create$")
 	containerStartRegexp   = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/[^/]*/(re)?start$")
 	containerInspectRegexp = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/[^/]*/json$")
-	execCreateRegexp       = regexp.MustCompile("^(/v[0-9\\.]*)?/containers/[^/]*/exec$")
 	execInspectRegexp      = regexp.MustCompile("^(/v[0-9\\.]*)?/exec/[^/]*/json$")
 
 	ErrInvalidNetworkMode = errors.New("--net option")
@@ -124,8 +123,6 @@ func (proxy *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		i = &startContainerInterceptor{proxy}
 	case containerInspectRegexp.MatchString(path):
 		i = &inspectContainerInterceptor{proxy}
-	case execCreateRegexp.MatchString(path):
-		i = &createExecInterceptor{proxy}
 	case execInspectRegexp.MatchString(path):
 		i = &inspectExecInterceptor{proxy}
 	default:

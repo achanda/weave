@@ -7,8 +7,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"syscall"
-
-	weavenet "github.com/weaveworks/weave/net"
 )
 
 var (
@@ -16,24 +14,11 @@ var (
 )
 
 func main() {
-	var (
-		args      = os.Args[1:]
-		notInExec = true
-	)
+	usr2 := make(chan os.Signal)
+	signal.Notify(usr2, syscall.SIGUSR2)
+	<-usr2
 
-	if len(args) > 0 && args[0] == "-s" {
-		notInExec = false
-		args = args[1:]
-	}
-
-	if notInExec {
-		usr2 := make(chan os.Signal)
-		signal.Notify(usr2, syscall.SIGUSR2)
-		<-usr2
-	}
-
-	_, err := weavenet.EnsureInterface("ethwe", -1)
-	checkErr(err)
+	args := os.Args[1:]
 
 	if len(args) == 0 {
 		checkErr(ErrNoCommandSpecified)
