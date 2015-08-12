@@ -14,7 +14,7 @@ var (
 )
 
 func main() {
-	usr2 := make(chan os.Signal)
+	usr2 := make(chan os.Signal, 1)
 	signal.Notify(usr2, syscall.SIGUSR2)
 	<-usr2
 
