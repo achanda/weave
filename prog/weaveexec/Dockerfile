@@ -1,6 +1,7 @@
 FROM gliderlabs/alpine
 
 MAINTAINER Weaveworks Inc <help@weave.works>
+LABEL role=system
 
 WORKDIR /home/weave
 VOLUME /w
