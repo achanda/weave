@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
 	"syscall"
 
 	weavenet "github.com/weaveworks/weave/net"
@@ -17,25 +16,8 @@ var (
 
 func main() {
 	var (
-		args      = os.Args[1:]
-		notInExec = true
+		args = os.Args[1:]
 	)
-
-	if len(args) > 0 && args[0] == "-s" {
-		notInExec = false
-		args = args[1:]
-	}
-
-	if len(args) > 0 && args[0] == "-c" { // tell pid 1 to continue
-		checkErr(syscall.Kill(1, syscall.SIGUSR2))
-		os.Exit(0)
-	}
-
-	if notInExec {
-		usr2 := make(chan os.Signal)
-		signal.Notify(usr2, syscall.SIGUSR2)
-		<-usr2
-	}
 
 	_, err := weavenet.EnsureInterface("ethwe", -1)
 	checkErr(err)

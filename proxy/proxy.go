@@ -311,16 +311,7 @@ func (proxy *Proxy) attach(container *docker.Container) error {
 		}
 	}
 
-	// exec another weavewait to let first weavewait know network is ready
-	config := docker.CreateExecOptions{
-		Container: container.ID,
-		Cmd:       []string{"/w/w", "-c"},
-	}
-	exec, err := proxy.client.CreateExec(config)
-	if err != nil {
-		return err
-	}
-	return proxy.client.StartExec(exec.ID, docker.StartExecOptions{})
+	return nil
 }
 
 func (proxy *Proxy) weaveCIDRsFromConfig(config *docker.Config, hostConfig *docker.HostConfig) ([]string, error) {
